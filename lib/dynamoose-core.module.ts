@@ -22,27 +22,31 @@ import {
 } from './interfaces/dynamoose-options.interface';
 
 function initialization(options: DynamooseModuleOptions) {
-  if (options.aws) {
-    aws.sdk.config.update(options.aws);
-  }
-  if (options.local) {
-    if (typeof options.local === 'boolean') {
-      aws.ddb.local();
-    } else {
-      aws.ddb.local(options.local);
+  try {
+    if (options.aws) {
+      aws.sdk.config.update(options.aws);
     }
-  }
-  if (options.model) {
-    model.defaults.set(options.model);
-  }
-  if (options.logger) {
-    let loggerService: LoggerService;
-    if (typeof options.logger === 'boolean') {
-      loggerService = new Logger(DynamooseModule.name);
-    } else {
-      loggerService = options.logger;
+    if (options.local) {
+      if (typeof options.local === 'boolean') {
+        aws.ddb.local();
+      } else {
+        aws.ddb.local(options.local);
+      }
     }
-    logger.providers.add(new LoggerProvider(loggerService));
+    if (options.model) {
+      model.defaults.set(options.model);
+    }
+    if (options.logger) {
+      let loggerService: LoggerService;
+      if (typeof options.logger === 'boolean') {
+        loggerService = new Logger(DynamooseModule.name);
+      } else {
+        loggerService = options.logger;
+      }
+      logger.providers.add(new LoggerProvider(loggerService));
+    }
+  } catch (err) {
+    console.log('err', err);
   }
 }
 
@@ -50,72 +54,80 @@ function initialization(options: DynamooseModuleOptions) {
 @Module({})
 export class DynamooseCoreModule {
   static forRoot(options: DynamooseModuleOptions = {}): DynamicModule {
-    const initialProvider = {
-      provide: DYNAMOOSE_INITIALIZATION,
-      useFactory: () => initialization(options),
-    };
-    return {
-      module: DynamooseCoreModule,
-      providers: [initialProvider],
-      exports: [initialProvider],
-    };
+
+      const initialProvider = {
+        provide: DYNAMOOSE_INITIALIZATION,
+        useFactory: () => initialization(options),
+      };
+      return {
+        module: DynamooseCoreModule,
+        providers: [initialProvider],
+        exports: [initialProvider],
+      };
   }
 
   static forRootAsync(options: DynamooseModuleAsyncOptions): DynamicModule {
-    const initialProvider = {
-      provide: DYNAMOOSE_INITIALIZATION,
-      useFactory: (dynamoooseModuleOptions: DynamooseModuleOptions) =>
-        initialization(dynamoooseModuleOptions),
-      inject: [DYNAMOOSE_MODULE_OPTIONS],
-    };
+      const initialProvider = {
+        provide: DYNAMOOSE_INITIALIZATION,
+        useFactory: (dynamoooseModuleOptions: DynamooseModuleOptions) =>
+          initialization(dynamoooseModuleOptions),
+        inject: [DYNAMOOSE_MODULE_OPTIONS],
+      };
 
-    const asyncProviders = this.createAsyncProviders(options);
-    return {
-      module: DynamooseCoreModule,
-      imports: options.imports,
-      providers: [...asyncProviders, initialProvider],
-      exports: [initialProvider],
-    };
+      const asyncProviders = this.createAsyncProviders(options);
+      return {
+        module: DynamooseCoreModule,
+        imports: options.imports,
+        providers: [...asyncProviders, initialProvider],
+        exports: [initialProvider],
+      };
   }
 
   private static createAsyncProviders(
     options: DynamooseModuleAsyncOptions,
   ): Provider[] {
-    if (options.useExisting || options.useFactory) {
-      return [this.createAsyncOptionsProvider(options)];
+    try {
+
+      if (options.useExisting || options.useFactory) {
+        return [this.createAsyncOptionsProvider(options)];
+      }
+      const useClass = options.useClass as Type<DynamooseOptionsFactory>;
+      return [
+        this.createAsyncOptionsProvider(options),
+        {
+          provide: useClass,
+          useClass,
+        },
+      ];
+    } catch (err) {
+      console.log('err', err);
     }
-    const useClass = options.useClass as Type<DynamooseOptionsFactory>;
-    return [
-      this.createAsyncOptionsProvider(options),
-      {
-        provide: useClass,
-        useClass,
-      },
-    ];
+
+    return []
   }
 
   private static createAsyncOptionsProvider(
     options: DynamooseModuleAsyncOptions,
   ): Provider {
-    if (options.useFactory) {
+      if (options.useFactory) {
+        return {
+          provide: DYNAMOOSE_MODULE_OPTIONS,
+          useFactory: options.useFactory,
+          inject: options.inject || [],
+        };
+      }
+
+      const inject = [
+        (options.useClass || options.useExisting) as Type<
+          DynamooseOptionsFactory
+        >,
+      ];
+
       return {
         provide: DYNAMOOSE_MODULE_OPTIONS,
-        useFactory: options.useFactory,
-        inject: options.inject || [],
+        useFactory: async (optionsFactory: DynamooseOptionsFactory) =>
+          await optionsFactory.createDynamooseOptions(),
+        inject,
       };
-    }
-
-    const inject = [
-      (options.useClass || options.useExisting) as Type<
-        DynamooseOptionsFactory
-      >,
-    ];
-
-    return {
-      provide: DYNAMOOSE_MODULE_OPTIONS,
-      useFactory: async (optionsFactory: DynamooseOptionsFactory) =>
-        await optionsFactory.createDynamooseOptions(),
-      inject,
-    };
   }
 }
